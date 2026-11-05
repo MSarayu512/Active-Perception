@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {generate} from '../src/maze.js';import {Experiment} from '../src/experiment.js';
+import {evaluateClaims,assertModelPayloadSafe} from '../research/claims.mjs';
+test('shadow-only public input contains no maze truth',()=>{const m=generate(3,101),e=new Experiment(m,{budget:12});assert.doesNotThrow(()=>assertModelPayloadSafe(e.input(),m));assert.throws(()=>assertModelPayloadSafe({...e.input(),seed:101},m));});
+test('probabilistic claims track revisions, retractions and Brier score',()=>{const m=generate(3,101),edge=m.edges[0],truth=m.open.has(edge.key);const h=evaluateClaims(m,[{claims:[{edge_id:edge.key,p_open:truth?.1:.9,supporting_observation_ids:['obs0']}]},{claims:[{edge_id:edge.key,p_open:truth?.9:.1,supporting_observation_ids:['obs1'],revision_of:0}]},{claims:[{edge_id:edge.key,retracted:true,supporting_observation_ids:['obs2']}]}]);assert.equal(h[0].incorrect,1);assert.equal(h[1].incorrect,0);assert.equal(h[2].unknown,m.edges.length);assert.equal(h[2].transitions[0].retracted,true);assert(Math.abs(h[1].brier-.01)<1e-10);});

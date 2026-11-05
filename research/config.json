@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "experiment": "shadow-only-six-uncovered-faces",
+  "face_size": 3,
+  "maze_seeds": [101, 102, 103, 104, 105],
+  "sampling_seed": 20261105,
+  "training_seed": 20261106,
+  "split_seed": 20261107,
+  "measurement_budget": 12,
+  "model_call_budget": 13,
+  "max_output_tokens": 32000,
+  "initial_control": [0, 0, 6],
+  "track": "vision-only",
+  "activation_capture": {"enabled": false, "layers": [], "positions": "generated", "tensor_type": "hidden_state", "sample_every": 1},
+  "local_model": {"checkpoint": null, "revision": null, "dtype": "auto", "quantization": "none", "attention_backend": "eager", "device_map": "auto", "context_limit": null},
+  "adapter": {"enabled": false, "trained_checkpoint": null}
+}

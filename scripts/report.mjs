@@ -1,0 +1,8 @@
+import {readdir,readFile} from 'node:fs/promises';
+import path from 'node:path';
+const dir=process.argv[2]||'runs';
+const runs=[];for(const file of await readdir(dir))if(file.endsWith('.json')){const r=JSON.parse(await readFile(path.join(dir,file),'utf8'));if([1,2].includes(r.schema_version)&&r.backend==='threejs-exact-face-shadows')runs.push(r);}
+const groups=new Map();for(const r of runs){const k=`${r.model} / track=${r.track||"vision-only"} / size=${r.size} / budget=${r.budget}`;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
+const median=a=>{const b=a.filter(Number.isFinite).sort((x,y)=>x-y);return b.length?b.length%2?b[(b.length-1)/2]:(b[b.length/2-1]+b[b.length/2])/2:null;};
+const summary=[...groups].map(([condition,rs])=>({condition,runs:rs.length,completed:rs.filter(r=>r.result).length,valid_routes:rs.filter(r=>r.result?.valid).length,optimal_routes:rs.filter(r=>r.result?.optimal).length,abstained:rs.filter(r=>r.result?.status==='abstained').length,uncertainty_pauses:rs.filter(r=>r.stop?.reason==='model_uncertain_paused').length,incomplete:rs.filter(r=>!r.result).length,mean_coverage:rs.reduce((s,r)=>s+r.metrics.coverage,0)/rs.length,median_success_seconds_completed_only:median(rs.filter(r=>r.result?.valid).map(r=>r.timing.task_success_seconds)),median_exact_reconstruction_seconds_achieved_only:median(rs.map(r=>r.timing.first_exact_reconstruction_seconds)),total_api_seconds:rs.reduce((s,r)=>s+r.timing.model_request_seconds,0)}));
+console.log(JSON.stringify({note:'Success-time medians exclude failures; interpret together with counts. Pauses are included in elapsed milestone times. Match seeds between conditions.',summary},null,2));

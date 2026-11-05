@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.example
+runs/
+.DS_Store
+VALIDATION.md 
+START_HERE.txt
+batch-results/
+research-results/
