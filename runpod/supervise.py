@@ -19,7 +19,7 @@ def main():
     if len(gpu.stdout.strip().splitlines())<a.tp: sys.exit('Not enough visible GPUs for tensor parallel setting')
     if ready('http://127.0.0.1:8001/health') or ready('http://127.0.0.1:8000/api/status'): sys.exit('Existing service detected. Stop it before starting another.')
     checkpoint=MODELS[a.model]
-    command=['vllm','serve',checkpoint,'--host','127.0.0.1','--port','8001','--tensor-parallel-size',str(a.tp),'--max-model-len',str(a.max_model_len),'--gpu-memory-utilization',str(a.gpu_util),'--dtype','auto']
+    command=['vllm','serve',checkpoint,'--host','127.0.0.1','--port','8010', '--max-num-seqs', '8', '--tensor-parallel-size',str(a.tp),'--max-model-len',str(a.max_model_len),'--gpu-memory-utilization',str(a.gpu_util),'--dtype','auto']
     if os.getenv('LUMEN_REVISION'): command+=['--revision',os.environ['LUMEN_REVISION']]
     env=os.environ.copy();env.update(LLM_PROVIDER='local-vllm',LLM_MODEL=checkpoint,LLM_BASE_URL='http://127.0.0.1:8001/v1',LLM_MAX_TOKENS='32000',PORT='8000')
     logs=ROOT/'runpod'/'logs';logs.mkdir(exist_ok=True)
