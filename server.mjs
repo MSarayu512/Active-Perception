@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from "node:crypto";
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -120,11 +121,120 @@ const server=http.createServer(async(req,res)=>{
     try{response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',...(anthropic?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{Authorization:`Bearer ${key||'local'}`})},body:JSON.stringify(payload),signal:AbortSignal.any([AbortSignal.timeout(Number(process.env.LLM_TIMEOUT_MS)||1800000),disconnected.signal]),redirect:'error'});}
     catch(error){throw providerConnectionError(error);}
     if(!response.ok)throw Error(`Provider HTTP ${response.status}. No automatic retry was made.`);
-    const raw=await response.json(),text=anthropic?(raw.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('\n'):raw.choices?.[0]?.message?.content;
-    const stopReason=anthropic?raw.stop_reason:raw.choices?.[0]?.finish_reason;
-    if(typeof text!=='string')throw Error('Provider returned no text');
-    let decision;try{decision=parseDecision(text);}catch{json(res,422,{...diagnoseDecision(text,stopReason,raw.usage),usage:raw.usage,seconds:(performance.now()-started)/1000});return;}
-    json(res,200,{decision,model:raw.model||model,usage:raw.usage,generated_text:text,reasoning_provenance:anthropic?'not_exposed':raw.choices?.[0]?.message?.reasoning_content?'provider_reasoning_content':'not_exposed',reasoning_content:raw.choices?.[0]?.message?.reasoning_content??null,finish_reason:stopReason,seconds:(performance.now()-started)/1000});
+    const raw = await response.json();
+
+    const text = anthropic
+      ? (raw.content || [])
+          .filter(c => c.type === "text")
+          .map(c => c.text)
+          .join("\n")
+      : raw.choices?.[0]?.message?.content;
+
+    const stopReason = anthropic
+      ? raw.stop_reason
+      : raw.choices?.[0]?.finish_reason;
+
+    const reasoningContent = anthropic
+      ? null
+      : raw.choices?.[0]?.message?.reasoning_content ?? null;
+
+    const generationId = randomUUID();
+
+    const record = {
+      id: generationId,
+      timestamp: new Date().toISOString(),
+      model: raw.model || model,
+      generated_text: text ?? null,
+      reasoning_content: reasoningContent,
+      reasoning_provenance: reasoningContent
+        ? "provider_exposed"
+        : "not_separately_exposed",
+      usage: raw.usage ?? null,
+      finish_reason: stopReason ?? null,
+      validation_error: null
+    };
+
+    const saveDir = path.join(root, "runs", "raw-generations");
+
+    await mkdir(saveDir, { recursive: true });
+
+    const savePath = path.join(saveDir, `${generationId}.json`);
+
+    async function saveGeneration() {
+      await writeFile(
+        savePath,
+        JSON.stringify(record, null, 2),
+        { mode: 0o600 }
+      );
+    }
+
+    // Save before parsing.
+    await saveGeneration();
+
+    if (typeof text !== "string") {
+      record.validation_error = "Provider returned no text";
+      await saveGeneration();
+
+      json(res, 422, {
+        error: record.validation_error,
+        generation_id: generationId,
+        generated_text: text ?? null,
+        reasoning_content: reasoningContent,
+        reasoning_provenance: record.reasoning_provenance,
+        usage: raw.usage ?? null,
+        finish_reason: stopReason ?? null
+      });
+    return;
+  }
+
+    let decision;
+
+    try {
+      decision = parseDecision(text);
+
+      if (
+        !decision ||
+        !["measure", "answer", "abstain"].includes(decision.type)
+      ) {
+        throw new Error(
+          "Expected type measure, answer or abstain"
+        );
+      }
+
+    } catch (error) {
+      record.validation_error = error.message;
+
+      record.validation_diagnostics = {
+        ...diagnoseDecision(text, stopReason, raw.usage),
+        actual_decision_type: decision?.type ?? null
+      };
+
+      await saveGeneration();
+
+      json(res, 422, {
+        error: error.message,
+        generation_id: generationId,
+        generated_text: text,
+        reasoning_content: reasoningContent,
+        usage: raw.usage,
+        finish_reason: stopReason,
+        seconds: (performance.now() - started) / 1000
+      });
+
+      return;
+    }
+
+    json(res, 200, {
+      generation_id: generationId,
+      decision,
+      model: raw.model || model,
+      usage: raw.usage,
+      generated_text: text,
+      reasoning_content: reasoningContent,
+      reasoning_provenance: record.reasoning_provenance,
+      finish_reason: stopReason,
+      seconds: (performance.now() - started) / 1000
+    });
    }catch(e){if(!res.destroyed)json(res,502,{error:safeError(e),seconds:(performance.now()-started)/1000});}finally{res.off('close',onClose);active=false;}return;
   }
   if(req.method==='POST'&&url.pathname==='/api/save'){
