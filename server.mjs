@@ -63,12 +63,79 @@ export function extractJSON(text){
  }
  return null;
 }
-export function parseDecision(text){
- const stripped=text.trim().replace(/```(?:json)?/gi,'').trim();
- try{return JSON.parse(stripped);}catch{}
- const candidate=extractJSON(stripped);
- if(candidate===null)throw Error(text.includes('{')?'truncated':'no-json');
- return JSON.parse(candidate);
+export function parseDecision(text) {
+  const validTypes = new Set(["measure", "answer", "abstain"]);
+
+  function validDecision(value) {
+    return value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      validTypes.has(value.type);
+  }
+
+  const trimmed = text.trim();
+
+  // Prefer a complete, directly parseable JSON response.
+  try {
+    const direct = JSON.parse(trimmed);
+    if (validDecision(direct)) return direct;
+  } catch {}
+
+  // Search balanced JSON objects, ignoring braces inside strings.
+  const candidates = [];
+
+  for (let start = 0; start < trimmed.length; start++) {
+    if (trimmed[start] !== "{") continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (inString && ch === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (inString) continue;
+
+      if (ch === "{") depth++;
+
+      if (ch === "}") {
+        depth--;
+
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(trimmed.slice(start, i + 1));
+            if (validDecision(parsed)) {
+              candidates.push(parsed);
+            }
+          } catch {}
+
+          break;
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    throw new Error("No valid measure, answer or abstain decision found");
+  }
+
+  // The final valid decision is preferred.
+  return candidates[candidates.length - 1];
 }
 // Why a response could not be parsed, in terms the operator can act on.
 export function diagnoseDecision(text,stopReason,usage){
