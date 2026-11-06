@@ -3,10 +3,15 @@ import { randomUUID } from "node:crypto";
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
+import { Agent } from "undici";
 const root=path.dirname(fileURLToPath(import.meta.url));
 let port=Number(process.env.PORT||8000);
 const provider=process.env.LLM_PROVIDER||'anthropic',model=process.env.LLM_MODEL||'',key=process.env.LLM_API_KEY||'';
 const localProvider=provider==='local-vllm';
+const localDispatcher = new Agent({
+  headersTimeout: 0,
+  bodyTimeout: 0
+});
 const base=(process.env.LLM_BASE_URL||(provider==='anthropic'?'https://api.anthropic.com/v1':'https://api.openai.com/v1')).replace(/\/$/,'');
 const system=`EVIDENCE GATE. Every claim is checked against captured raw pixels before acceptance. Ambiguous or conflicting readings stay unknown. A route must use observed, claimed-open edges, and cannot be certified shortest while unresolved edges allow a shorter route. Do not answer prematurely. This is a pixel-verified experiment even when only images are shown to you. Receiver resolution varies with maze size; use each observation's resolution and geometry, not fixed pixel dimensions.
 You are solving a maze on the SIX SURFACES of a cube, not its interior. Each face has size x size cells. IDs are FACE:row:column, row 0 at top, column 0 at left. Candidate edges list all geometrically adjacent cell pairs, including cube seams, but do NOT reveal passages. A closed edge has a raised wall; an open edge has no wall. All cells exist.
@@ -185,7 +190,36 @@ const server=http.createServer(async(req,res)=>{
       ]
     };
     let response;
-    try{response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',...(anthropic?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{Authorization:`Bearer ${key||'local'}`})},body:JSON.stringify(payload),signal:AbortSignal.any([AbortSignal.timeout(Number(process.env.LLM_TIMEOUT_MS)||1800000),disconnected.signal]),redirect:'error'});}
+    try{response=await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(anthropic
+          ? {
+              "x-api-key": key,
+              "anthropic-version": "2023-06-01"
+            }
+          : {
+              Authorization: `Bearer ${key || "local"}`
+            })
+      },
+      body: JSON.stringify(payload),
+
+      // No HTTP header/body timeout for local Qwen.
+      dispatcher: localProvider ? localDispatcher : undefined,
+
+      // No overall time limit for local Qwen.
+      signal: localProvider
+        ? disconnected.signal
+        : AbortSignal.any([
+            AbortSignal.timeout(
+              Number(process.env.LLM_TIMEOUT_MS) || 1800000
+            ),
+            disconnected.signal
+          ]),
+
+      redirect: "error"
+      });}
     catch(error){throw providerConnectionError(error);}
     if(!response.ok)throw Error(`Provider HTTP ${response.status}. No automatic retry was made.`);
     const raw = await response.json();
